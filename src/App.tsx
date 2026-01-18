@@ -1,186 +1,189 @@
 /**
  * SkillPocket Website - Main App
- * 解构主义 / 实验激进 设计
+ * 分页动画系统：滚动触发页面切换，动画自动播放到最终状态
  */
 
-import { useEffect, useMemo } from 'react'
+import { useEffect, useState, useRef, useCallback } from 'react'
 import { useSceneStore } from '@/stores/sceneStore'
-import { useScrollProgress } from '@/hooks/useScrollProgress'
-import { useSmoothScroll } from '@/hooks/useSmoothScroll'
 
-// Scenes - 移除了 Explode
-import { Prologue, Collapse, Tear, Order, Download } from '@/components/scenes'
+// Pages
+import { Landing, Features, Download } from '@/components/pages'
 
 // Effects
-import { Noise, Scanlines, WaveDistortion } from '@/components/effects'
-
-// UI
-import { Cursor } from '@/components/ui/Cursor'
-import { Progress } from '@/components/ui/Progress'
-import { Navigation } from '@/components/ui/Navigation'
+import { Noise, Scanlines, CircuitMatrix } from '@/components/effects'
 
 // Styles
 import '@/styles/globals.css'
 
-// 场景配置 - 移除了 Explode，调整过渡区间
-const SCENES = {
-  collapse: { start: 0, end: 0.25, fadeOut: 0.20 },
-  tear: { start: 0.18, end: 0.55, fadeIn: 0.20, fadeOut: 0.50 },
-  order: { start: 0.48, end: 0.80, fadeIn: 0.52, fadeOut: 0.75 },
-  download: { start: 0.72, end: 1, fadeIn: 0.75 },
-}
+// 页面状态类型
+type PageState = 'hidden' | 'entering' | 'complete'
 
 function App() {
-  // 启用平滑滚动
-  useSmoothScroll()
+  const { lowPerformanceMode } = useSceneStore()
+  const [currentPage, setCurrentPage] = useState(0)
+  const [pageStates, setPageStates] = useState<PageState[]>(['entering', 'hidden', 'hidden'])
+  const containerRef = useRef<HTMLDivElement>(null)
+  const isScrolling = useRef(false)
+  const lastScrollTime = useRef(0)
 
-  const scrollProgress = useScrollProgress()
-  const {
-    prologueComplete,
-    setPrologueComplete,
-    setScrollProgress,
-    lowPerformanceMode,
-  } = useSceneStore()
+  // 处理滚动触发的页面切换
+  const handleWheel = useCallback((e: WheelEvent) => {
+    const now = Date.now()
+    // 防抖：至少间隔 800ms
+    if (now - lastScrollTime.current < 800) return
+    if (isScrolling.current) return
 
-  // 同步滚动进度到 store
+    const direction = e.deltaY > 0 ? 1 : -1
+    const nextPage = currentPage + direction
+
+    if (nextPage >= 0 && nextPage < 3) {
+      lastScrollTime.current = now
+      isScrolling.current = true
+
+      setCurrentPage(nextPage)
+
+      // 更新页面状态
+      setPageStates(prev => {
+        const newStates = [...prev]
+        // 当前离开的页面设为 complete
+        newStates[currentPage] = 'complete'
+        // 新进入的页面设为 entering
+        newStates[nextPage] = 'entering'
+        return newStates
+      })
+
+      // 动画完成后解锁滚动
+      setTimeout(() => {
+        isScrolling.current = false
+        // 将当前页面设为 complete
+        setPageStates(prev => {
+          const newStates = [...prev]
+          newStates[nextPage] = 'complete'
+          return newStates
+        })
+      }, 1200) // 动画时长
+    }
+  }, [currentPage])
+
+  // 键盘导航
+  const handleKeyDown = useCallback((e: KeyboardEvent) => {
+    if (e.key === 'ArrowDown' || e.key === 'PageDown' || e.key === ' ') {
+      e.preventDefault()
+      handleWheel({ deltaY: 100 } as WheelEvent)
+    } else if (e.key === 'ArrowUp' || e.key === 'PageUp') {
+      e.preventDefault()
+      handleWheel({ deltaY: -100 } as WheelEvent)
+    }
+  }, [handleWheel])
+
+  // 触摸支持
+  const touchStartY = useRef(0)
+  const handleTouchStart = useCallback((e: TouchEvent) => {
+    touchStartY.current = e.touches[0].clientY
+  }, [])
+
+  const handleTouchEnd = useCallback((e: TouchEvent) => {
+    const deltaY = touchStartY.current - e.changedTouches[0].clientY
+    if (Math.abs(deltaY) > 50) {
+      handleWheel({ deltaY } as WheelEvent)
+    }
+  }, [handleWheel])
+
+  // 绑定事件
   useEffect(() => {
-    setScrollProgress(scrollProgress)
-  }, [scrollProgress, setScrollProgress])
+    const container = containerRef.current
+    if (!container) return
 
-  // 计算各场景进度 (0-1)
-  const getSceneProgress = (start: number, end: number) => {
-    if (scrollProgress < start) return 0
-    if (scrollProgress > end) return 1
-    return (scrollProgress - start) / (end - start)
-  }
+    window.addEventListener('wheel', handleWheel, { passive: false })
+    window.addEventListener('keydown', handleKeyDown)
+    window.addEventListener('touchstart', handleTouchStart)
+    window.addEventListener('touchend', handleTouchEnd)
 
-  // 计算场景透明度 - 使用平滑的淡入淡出
-  const getSceneOpacity = (scene: keyof typeof SCENES) => {
-    const config = SCENES[scene]
-    const p = scrollProgress
+    // 首页动画完成后标记为 complete
+    const timer = setTimeout(() => {
+      setPageStates(prev => {
+        const newStates = [...prev]
+        newStates[0] = 'complete'
+        return newStates
+      })
+    }, 2000)
 
-    // 淡入
-    if ('fadeIn' in config && config.fadeIn !== undefined) {
-      if (p < config.fadeIn) return 0
-      if (p < config.start + 0.05) {
-        return (p - config.fadeIn) / (config.start + 0.05 - config.fadeIn)
-      }
-    } else if (p < config.start) {
-      return 0
+    return () => {
+      window.removeEventListener('wheel', handleWheel)
+      window.removeEventListener('keydown', handleKeyDown)
+      window.removeEventListener('touchstart', handleTouchStart)
+      window.removeEventListener('touchend', handleTouchEnd)
+      clearTimeout(timer)
     }
-
-    // 淡出
-    if ('fadeOut' in config && config.fadeOut !== undefined) {
-      if (p > config.end) return 0
-      if (p > config.fadeOut) {
-        return 1 - (p - config.fadeOut) / (config.end - config.fadeOut)
-      }
-    } else if (p > config.end) {
-      return 0
-    }
-
-    return 1
-  }
-
-  // 场景进度和透明度 - 移除了 explode
-  const scenes = useMemo(() => ({
-    collapse: {
-      progress: getSceneProgress(SCENES.collapse.start, SCENES.collapse.end),
-      opacity: getSceneOpacity('collapse'),
-    },
-    tear: {
-      progress: getSceneProgress(SCENES.tear.start, SCENES.tear.end),
-      opacity: getSceneOpacity('tear'),
-    },
-    order: {
-      progress: getSceneProgress(SCENES.order.start, SCENES.order.end),
-      opacity: getSceneOpacity('order'),
-    },
-    download: {
-      progress: getSceneProgress(SCENES.download.start, SCENES.download.end),
-      opacity: getSceneOpacity('download'),
-    },
-  }), [scrollProgress])
-
-  const handlePrologueComplete = () => {
-    setPrologueComplete(true)
-  }
+  }, [handleWheel, handleKeyDown, handleTouchStart, handleTouchEnd])
 
   return (
-    <div className="app">
-      {/* 顶部导航菜单 (含语言切换器) */}
-      <Navigation />
-
-      {/* 自定义光标 */}
-      <Cursor />
+    <div className="app" ref={containerRef}>
+      {/* 电路矩阵艺术动画背景 */}
+      <CircuitMatrix opacity={0.6} speed={1} density={1} />
 
       {/* 全局效果层 */}
       {!lowPerformanceMode && (
         <>
-          <Noise opacity={0.03} />
-          <Scanlines opacity={0.05} />
-          <WaveDistortion strength={35} maxRipples={6} />
+          <Noise opacity={0.015} />
+          <Scanlines opacity={0.02} />
         </>
       )}
 
-      {/* 进度指示器 */}
-      {prologueComplete && <Progress progress={scrollProgress} />}
+      {/* 页面指示器 */}
+      <div className="page-indicator">
+        {[0, 1, 2].map(i => (
+          <div
+            key={i}
+            className={`page-dot ${currentPage === i ? 'is-active' : ''}`}
+            onClick={() => {
+              if (!isScrolling.current && i !== currentPage) {
+                handleWheel({ deltaY: i > currentPage ? 100 : -100 } as WheelEvent)
+              }
+            }}
+          />
+        ))}
+      </div>
 
-      {/* 序幕 - 屏幕测试 */}
-      {!prologueComplete && (
-        <Prologue onComplete={handlePrologueComplete} />
-      )}
+      {/* 页面容器 */}
+      <main className="pages-container">
+        {/* 第1页：首页艺术动画 */}
+        <section
+          className={`page page--landing ${currentPage === 0 ? 'is-active' : ''} ${pageStates[0]}`}
+          style={{
+            transform: `translateY(${-currentPage * 100}vh)`,
+          }}
+        >
+          <Landing state={pageStates[0]} />
+        </section>
 
-      {/* 主内容 - 滚动驱动 */}
-      {prologueComplete && (
-        <main className="main-content">
-          {/* 占位高度用于滚动 - 减少到 500vh (移除了 Explode 场景) */}
-          <div style={{ height: '500vh' }}>
-            {/* 第一幕：文字崩塌 */}
-            <section
-              className="scene-container"
-              style={{
-                opacity: scenes.collapse.opacity,
-                pointerEvents: scenes.collapse.opacity > 0.1 ? 'auto' : 'none',
-              }}
-            >
-              <Collapse progress={scenes.collapse.progress} />
-            </section>
+        {/* 第2页：功能展示 */}
+        <section
+          className={`page page--features ${currentPage === 1 ? 'is-active' : ''} ${pageStates[1]}`}
+          style={{
+            transform: `translateY(${(1 - currentPage) * 100}vh)`,
+          }}
+        >
+          <Features state={pageStates[1]} />
+        </section>
 
-            {/* 第二幕：功能展示 */}
-            <section
-              className="scene-container"
-              style={{
-                opacity: scenes.tear.opacity,
-                pointerEvents: scenes.tear.opacity > 0.1 ? 'auto' : 'none',
-              }}
-            >
-              <Tear progress={scenes.tear.progress} />
-            </section>
+        {/* 第3页：下载 */}
+        <section
+          className={`page page--download ${currentPage === 2 ? 'is-active' : ''} ${pageStates[2]}`}
+          style={{
+            transform: `translateY(${(2 - currentPage) * 100}vh)`,
+          }}
+        >
+          <Download state={pageStates[2]} />
+        </section>
+      </main>
 
-            {/* 第三幕：秩序降临 */}
-            <section
-              className="scene-container"
-              style={{
-                opacity: scenes.order.opacity,
-                pointerEvents: scenes.order.opacity > 0.1 ? 'auto' : 'none',
-              }}
-            >
-              <Order progress={scenes.order.progress} />
-            </section>
-
-            {/* 第四幕：下载 */}
-            <section
-              className="scene-container"
-              style={{
-                opacity: scenes.download.opacity,
-                pointerEvents: scenes.download.opacity > 0.1 ? 'auto' : 'none',
-              }}
-            >
-              <Download progress={scenes.download.progress} />
-            </section>
-          </div>
-        </main>
+      {/* 滚动提示 */}
+      {currentPage < 2 && pageStates[currentPage] === 'complete' && (
+        <div className="scroll-hint">
+          <span className="scroll-hint-text">Scroll</span>
+          <div className="scroll-hint-arrow">↓</div>
+        </div>
       )}
     </div>
   )

@@ -7,6 +7,12 @@ export type Language = 'en' | 'zh'
 
 export const translations = {
   en: {
+    // Landing Page
+    landing: {
+      subtitle: 'Your Personal Skill Manager',
+      desc: 'Manage, organize, and master your Claude development skills',
+    },
+
     // Collapse Scene
     collapse: {
       subtitle1: 'MANAGE YOUR CLAUDE SKILLS',
@@ -139,6 +145,12 @@ export const translations = {
   },
 
   zh: {
+    // Landing Page
+    landing: {
+      subtitle: '你的个人技能管理器',
+      desc: '管理、整理并掌握你的 Claude 开发技能',
+    },
+
     // Collapse Scene
     collapse: {
       subtitle1: '管理你的 CLAUDE 技能',
